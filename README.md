@@ -4,6 +4,9 @@ Interactive 3D simulation of an orthogonal-acceleration time-of-flight mass
 analyser, built for teaching how the instrument actually works rather than for
 showing a pretty animation.
 
+## Try it out!
+https://desperadus.github.io/oaTOF-Sim/
+
 ## Features
 
 - 3D view of the pusher stack, flight tube, mirror and detector, with the
