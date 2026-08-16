@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>oaTOF 3D Physics Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/index.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="logo-container">
+            <div class="logo-icon">oa</div>
+            <div>
+                <h1>oaTOF 3D Physics Simulator</h1>
+                <div class="sub-title">Orthogonal Acceleration &bull; Two-Stage Gridless Reflectron &bull; TIMS Front End</div>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="mode-switch" role="group" aria-label="Front end mode">
+                <button class="mode-btn active" id="btn-mode-continuous" data-mode="continuous" aria-pressed="true">
+                    <span class="mode-name">Continuous Beam</span>
+                    <span class="mode-hint">Steady stream &bull; duty cycle limited</span>
+                </button>
+                <button class="mode-btn" id="btn-mode-tims" data-mode="tims" aria-pressed="false">
+                    <span class="mode-name">TIMS Front End</span>
+                    <span class="mode-hint">Mobility ramp &bull; second dimension</span>
+                </button>
+            </div>
+            <button class="btn btn-tour" id="btn-tour">Guided Tour</button>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <main class="visual-panel">
+            <div class="canvas-container" id="p5-canvas-holder">
+                <div class="canvas-overlay-controls">
+                    <button class="btn btn-primary btn-sm" id="btn-camera-reset">Reset Camera</button>
+                    <button class="btn btn-sm" id="btn-view-plan" title="Look down on the flight plane">Plan View</button>
+                    <button class="btn btn-sm" id="btn-view-side" title="Look along the beam axis">Side View</button>
+                    <button class="btn btn-sm btn-primary" id="btn-toggle-grid">Axes</button>
+                    <button class="btn btn-sm" id="btn-toggle-field" type="button" aria-pressed="false" title="Show the pusher field and the mirror equipotentials">Fields</button>
+                    <button class="btn btn-sm btn-primary" id="btn-toggle-trails" type="button" aria-pressed="true">Trails</button>
+                </div>
+                <div class="canvas-overlay-stats">
+                    <div class="stat-item">Front end: <span class="val" id="stat-mode">Continuous</span></div>
+                    <div class="stat-item">Acceleration: <span class="val" id="stat-accel">0 V</span></div>
+                    <div class="stat-item">Mirror V1 / V2: <span class="val" id="stat-mirror">0 / 0 V</span></div>
+                    <div class="stat-item">Flight time: <span class="val" id="stat-flight">0 &mu;s</span></div>
+                    <div class="stat-item">Detected / lost: <span class="val" id="stat-counts">0 / 0</span></div>
+                    <div class="stat-item">Measured duty cycle: <span class="val" id="stat-duty">&mdash;</span></div>
+                </div>
+                <div class="canvas-nav-tips">Drag to Rotate 3D &bull; Scroll to Zoom</div>
+                <div class="canvas-scale-note" id="canvas-scale-note">Transverse scale &times;4</div>
+                <div class="electric-field-legend" id="electric-field-legend" hidden>
+                    <span>Fields</span>
+                    <span class="field-note"><i class="legend-swatch swatch-pusher"></i>Pusher field, applied at each shot</span>
+                    <span class="field-note"><i class="legend-swatch swatch-mirror"></i>Mirror equipotentials, solved</span>
+                    <span class="field-direction-note">The equipotentials bulge out through the entrance because the mirror has no grid there. That bulge is the entrance lens.</span>
+                </div>
+                <div class="push-readout" id="push-readout">
+                    <span class="push-label">Pusher cycle</span>
+                    <canvas id="canvas-push-dial" width="132" height="34"></canvas>
+                </div>
+            </div>
+
+            <div class="bottom-controls-bar">
+                <div class="sim-controls-group">
+                    <button class="btn btn-primary" id="btn-play">Pause</button>
+                    <button class="btn" id="btn-step">Single Step</button>
+                    <button class="btn btn-danger" id="btn-reset">Reset Beam</button>
+                </div>
+
+                <div class="speed-control">
+                    <label for="input-playback">Playback</label>
+                    <div class="speed-input-wrap">
+                        <input type="number" id="input-playback" min="0.1" step="any" value="15" inputmode="decimal" aria-describedby="playback-help">
+                        <span aria-hidden="true">&mu;s of flight / s</span>
+                    </div>
+                    <span class="speed-help" id="playback-help">A real flight lasts about 56 &mu;s &mdash; this is the slow-motion factor</span>
+                </div>
+
+                <div class="sim-controls-group injection-controls">
+                    <label class="sample-select-label" for="select-sample">Sample</label>
+                    <select id="select-sample" class="sample-select"></select>
+                    <span class="injection-summary" id="injection-summary" aria-live="polite"></span>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar-panel">
+            <div class="tab-container">
+                <div class="tab-header">
+                    <button class="tab-btn active" data-tab="tab-spectrum">Spectrum</button>
+                    <button class="tab-btn" data-tab="tab-calibrate">Calibrate</button>
+                    <button class="tab-btn" data-tab="tab-focus">Focus</button>
+                    <button class="tab-btn" data-tab="tab-budget">Budget</button>
+                    <button class="tab-btn" data-tab="tab-mobility">Mobility</button>
+                    <button class="tab-btn" data-tab="tab-setup">Setup</button>
+                    <button class="tab-btn" data-tab="tab-theory">Theory</button>
+                </div>
+
+                <div class="tab-content active" id="tab-spectrum">
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Acquisition</span>
+                            <span class="card-note">Every ion is flown</span>
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Ions flown per species: <span class="value" id="lbl-ions-species">900</span></div>
+                            <input type="range" id="slider-ions-species" min="100" max="4000" step="50" value="900">
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-primary" id="btn-acquire">Acquire Spectrum</button>
+                            <button class="btn" id="btn-acquire-stop" disabled>Stop</button>
+                        </div>
+                        <div class="scan-progress" id="acquire-progress" aria-live="polite">Ready</div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Recorded Spectrum</span>
+                            <span class="card-note" id="spectrum-note">Flown, binned and counted</span>
+                        </div>
+                        <div class="segmented" role="group" aria-label="Spectrum axis">
+                            <button class="seg-btn active" data-axis="time">Flight time</button>
+                            <button class="seg-btn" data-axis="mass">Calibrated m/z</button>
+                        </div>
+                        <div class="plot-container" style="height: 210px;">
+                            <div class="plot-label-y">Counts</div>
+                            <div class="plot-label-x" id="spectrum-x-label">Flight time (&mu;s)</div>
+                            <canvas class="plot-canvas" id="canvas-spectrum"></canvas>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-sm" id="btn-zoom-peak">Zoom To Tallest Peak</button>
+                            <button class="btn btn-sm" id="btn-zoom-reset">Full Range</button>
+                        </div>
+                        <div class="spectrum-hint">Drag across the plot to zoom into a region</div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Measured Peaks</div>
+                        <div class="peak-table" id="peak-table">
+                            <div class="peak-empty">No spectrum acquired yet.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-calibrate">
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Detector &amp; Digitiser</span>
+                            <span class="card-note">Re-bins without re-flying</span>
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Digitiser bin width: <span class="value" id="lbl-bin">250 ps</span></div>
+                            <input type="range" id="slider-bin" min="25" max="2000" step="25" value="250">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Single-ion pulse width: <span class="value" id="lbl-response">0.90 ns</span></div>
+                            <input type="range" id="slider-response" min="0" max="5" step="0.05" value="0.9">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Ions per push (strongest species): <span class="value" id="lbl-ions-push">40</span></div>
+                            <input type="range" id="slider-ions-push" min="1" max="200" step="1" value="40">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Transients summed: <span class="value" id="lbl-transients">400</span></div>
+                            <input type="range" id="slider-transients" min="1" max="2000" step="1" value="400">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Saturation per transient: <span class="value" id="lbl-saturation">off</span></div>
+                            <input type="range" id="slider-saturation" min="0" max="20" step="0.5" value="0">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Electronics delay: <span class="value" id="lbl-delay">12.0 ns</span></div>
+                            <input type="range" id="slider-delay" min="0" max="60" step="0.5" value="12">
+                        </div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Mass Calibration</span>
+                            <span class="card-note" id="calibration-note"></span>
+                        </div>
+                        <div class="theory-equation compact">t = a &middot; &radic;(m/z) + b</div>
+                        <div class="toggle-container">
+                            <span class="control-label" style="font-size:12px; font-weight:600;">Fit the offset term b</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle-calibration-offset" checked>
+                                <span class="slider-toggle"></span>
+                            </label>
+                        </div>
+                        <div class="plot-container" style="height: 180px;">
+                            <div class="plot-label-y">Error (ppm)</div>
+                            <div class="plot-label-x">m/z</div>
+                            <canvas class="plot-canvas" id="canvas-calibration"></canvas>
+                        </div>
+                        <div class="derived-grid">
+                            <div><span class="lbl">a</span><span class="val" id="cal-slope">&mdash;</span></div>
+                            <div><span class="lbl">b</span><span class="val" id="cal-intercept">&mdash;</span></div>
+                            <div><span class="lbl">Calibrants</span><span class="val" id="cal-count">&mdash;</span></div>
+                            <div><span class="lbl">Worst error</span><span class="val" id="cal-worst">&mdash;</span></div>
+                        </div>
+                        <div class="peak-table" id="calibration-table"></div>
+                        <div class="hint-text">
+                            The flight itself is exactly proportional to &radic;(m/z). The offset is everything that is not flight &mdash; cable delay, amplifier delay, trigger timing &mdash; which is why one calibrant is never enough.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-focus">
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Focus Explorer</span>
+                            <span class="card-note">One coordinate at a time</span>
+                        </div>
+                        <div class="segmented" role="group" aria-label="Focus axis">
+                            <button class="seg-btn active" data-focus-axis="position">Start position</button>
+                            <button class="seg-btn" data-focus-axis="velocity">Start velocity</button>
+                            <button class="seg-btn" data-focus-axis="height">Start height</button>
+                        </div>
+                        <div class="plot-container" style="height: 200px;">
+                            <div class="plot-label-y">Arrival time shift (ns)</div>
+                            <div class="plot-label-x" id="focus-x-label">Offset (mm)</div>
+                            <canvas class="plot-canvas" id="canvas-focus"></canvas>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-primary btn-sm" id="btn-measure-focus">Measure Focus</button>
+                        </div>
+                        <div class="spectrum-hint" id="focus-summary">Probe ions differing in exactly one starting coordinate</div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Mirror Tune</span>
+                            <span class="card-note" id="tune-note"></span>
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Stage 1 voltage: <span class="value" id="lbl-mirror-stage1">0.6525 &times; E</span></div>
+                            <input type="range" id="slider-mirror-stage1" min="0.30" max="0.95" step="0.0005" value="0.6525">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Back plate voltage: <span class="value" id="lbl-mirror-back">1.3198 &times; E</span></div>
+                            <input type="range" id="slider-mirror-back" min="1.005" max="2.2" step="0.0002" value="1.3198">
+                        </div>
+                        <div class="plot-container" style="height: 175px;">
+                            <div class="plot-label-y">Spread across beam (ns, log)</div>
+                            <div class="plot-label-x">Back plate voltage / ion energy</div>
+                            <canvas class="plot-canvas" id="canvas-tune"></canvas>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-sm" id="btn-scan-tune">Scan Mirror Tune</button>
+                            <button class="btn btn-primary btn-sm" id="btn-auto-tune">Auto-Tune Mirror</button>
+                        </div>
+                        <div class="scan-progress" id="tune-progress">Ready</div>
+                        <div class="hint-text">
+                            The auto-tune searches both mirror voltages for the pair that flattens arrival time across the beam thickness. It is a search over flown ions, not a formula.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-budget">
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Resolution Budget</span>
+                            <span class="card-note" id="budget-note"></span>
+                        </div>
+                        <div class="plot-container" style="height: 200px;">
+                            <div class="plot-label-x">Peak width contribution (1&sigma;, ns)</div>
+                            <canvas class="plot-canvas" id="canvas-budget"></canvas>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-primary btn-sm" id="btn-measure-budget">Measure Budget</button>
+                        </div>
+                        <div class="derived-grid">
+                            <div><span class="lbl">Measured FWHM</span><span class="val" id="budget-fwhm">&mdash;</span></div>
+                            <div><span class="lbl">Resolution m/&Delta;m</span><span class="val" id="budget-resolution">&mdash;</span></div>
+                            <div><span class="lbl">Quadrature sum</span><span class="val" id="budget-quadrature">&mdash;</span></div>
+                            <div><span class="lbl">Ions lost</span><span class="val" id="budget-lost">&mdash;</span></div>
+                            <div><span class="lbl">Peak shape</span><span class="val" id="budget-shape">&mdash;</span></div>
+                        </div>
+                        <div class="hint-text">
+                            Each term is measured by silencing the whole source and restoring one spread, then flying the peak again. The terms are not strictly independent, so the dashed line shows the quadrature sum next to the peak that was actually measured.
+                        </div>
+                        <div class="hint-text">
+                            Peak shape is FWHM divided by 2.3548&sigma;. A value of 1.00 is a Gaussian; below that the peak has a sharp core and long tails, which is what a gridless mirror does to ions that wander off the axis.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-mobility">
+                    <div class="controls-card">
+                        <div class="card-title">
+                            <span>Mobility Map</span>
+                            <span class="card-note">1/K&#8320; against m/z</span>
+                        </div>
+                        <div class="plot-container" style="height: 230px;">
+                            <div class="plot-label-y">1/K&#8320; (V&middot;s/cm&sup2;)</div>
+                            <div class="plot-label-x">m/z</div>
+                            <canvas class="plot-canvas" id="canvas-mobility"></canvas>
+                        </div>
+                        <div class="spectrum-hint">The dashed line is the current position in the mobility ramp</div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">TIMS Tunnel</div>
+                        <div class="control-group">
+                            <div class="control-label">Ramp position: <span class="value" id="lbl-ramp">50%</span></div>
+                            <input type="range" id="slider-ramp" min="0" max="1" step="0.005" value="0.5">
+                        </div>
+                        <div class="derived-grid">
+                            <div><span class="lbl">Field now</span><span class="val" id="tims-field">&mdash;</span></div>
+                            <div><span class="lbl">Eluting 1/K&#8320;</span><span class="val" id="tims-eluting">&mdash;</span></div>
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Gas velocity: <span class="value" id="lbl-gas">150 m/s</span></div>
+                            <input type="range" id="slider-gas" min="40" max="400" step="5" value="150">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Ramp start field: <span class="value" id="lbl-ramp-start">60 V/cm</span></div>
+                            <input type="range" id="slider-ramp-start" min="20" max="160" step="1" value="60">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Ramp end field: <span class="value" id="lbl-ramp-end">12 V/cm</span></div>
+                            <input type="range" id="slider-ramp-end" min="2" max="80" step="1" value="12">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Ramp duration: <span class="value" id="lbl-ramp-time">100 ms</span></div>
+                            <input type="range" id="slider-ramp-time" min="10" max="400" step="5" value="100">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Mobility peak width: <span class="value" id="lbl-packet">1.00 ms</span></div>
+                            <input type="range" id="slider-packet" min="0.02" max="10" step="0.02" value="1">
+                        </div>
+                        <div class="toggle-container">
+                            <span class="control-label" style="font-size:12px; font-weight:600;">Synchronise the pusher to the release</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle-tims-sync">
+                                <span class="slider-toggle"></span>
+                            </label>
+                        </div>
+                        <div class="hint-text" id="tims-sync-note"></div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Species in the Ramp</div>
+                        <div class="species-legend" id="mobility-legend"></div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-setup">
+                    <div class="controls-card">
+                        <div class="card-title">Pusher</div>
+                        <div class="control-group">
+                            <div class="control-label">Acceleration voltage: <span class="value" id="lbl-accel">9.00 kV</span></div>
+                            <input type="range" id="slider-accel" min="2" max="20" step="0.1" value="9">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Pusher field: <span class="value" id="lbl-pusher-field">600 V/mm</span></div>
+                            <input type="range" id="slider-pusher-field" min="50" max="1500" step="10" value="600">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Pusher gap: <span class="value" id="lbl-pusher-gap">6.0 mm</span></div>
+                            <input type="range" id="slider-pusher-gap" min="2" max="15" step="0.5" value="6">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Acceleration gap: <span class="value" id="lbl-accel-gap">20 mm</span></div>
+                            <input type="range" id="slider-accel-gap" min="5" max="60" step="1" value="20">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Pusher length along beam: <span class="value" id="lbl-pusher-length">30 mm</span></div>
+                            <input type="range" id="slider-pusher-length" min="5" max="80" step="1" value="30">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Push frequency: <span class="value" id="lbl-push-frequency">10.0 kHz</span></div>
+                            <input type="range" id="slider-push-frequency" min="1" max="40" step="0.5" value="10">
+                        </div>
+                        <div class="derived-grid">
+                            <div><span class="lbl">Ion energy</span><span class="val" id="derived-energy">&mdash;</span></div>
+                            <div><span class="lbl">Grid voltage</span><span class="val" id="derived-grid-voltage">&mdash;</span></div>
+                            <div><span class="lbl">Push period</span><span class="val" id="derived-period">&mdash;</span></div>
+                            <div><span class="lbl">Energy spread</span><span class="val" id="derived-spread">&mdash;</span></div>
+                        </div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Flight Path &amp; Mirror</div>
+                        <div class="control-group">
+                            <div class="control-label">Drift length: <span class="value" id="lbl-drift">700 mm</span></div>
+                            <input type="range" id="slider-drift" min="150" max="1500" step="10" value="700">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Flight tube half-height: <span class="value" id="lbl-aperture">20 mm</span></div>
+                            <input type="range" id="slider-aperture" min="4" max="50" step="1" value="20">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Mirror field model</div>
+                            <div class="segmented" role="group" aria-label="Mirror field model">
+                                <button class="seg-btn active" data-mirror="solved">Solved gridless</button>
+                                <button class="seg-btn" data-mirror="ideal">Ideal ramp</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Retarding stage length: <span class="value" id="lbl-stage1">50 mm</span></div>
+                            <input type="range" id="slider-stage1" min="10" max="150" step="5" value="50">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Reflecting stage length: <span class="value" id="lbl-stage2">150 mm</span></div>
+                            <input type="range" id="slider-stage2" min="40" max="400" step="5" value="150">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Mirror half-height: <span class="value" id="lbl-mirror-height">25 mm</span></div>
+                            <input type="range" id="slider-mirror-height" min="8" max="60" step="1" value="25">
+                        </div>
+                        <div class="derived-grid">
+                            <div><span class="lbl">Solve grid</span><span class="val" id="derived-solve">&mdash;</span></div>
+                            <div><span class="lbl">Entrance leakage</span><span class="val" id="derived-leak">&mdash;</span></div>
+                        </div>
+                        <div class="hint-text">
+                            Changing a mirror dimension re-solves Laplace's equation inside the aperture. The two mirror voltages do not: the solution is stored as two basis fields and any tune is a weighted sum of them.
+                        </div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Ion Beam</div>
+                        <div class="control-group">
+                            <div class="control-label">Beam energy: <span class="value" id="lbl-beam-energy">8.0 eV</span></div>
+                            <input type="range" id="slider-beam-energy" min="1" max="40" step="0.5" value="8">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Beam energy spread: <span class="value" id="lbl-beam-spread">1.00 eV</span></div>
+                            <input type="range" id="slider-beam-spread" min="0" max="6" step="0.05" value="1">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Beam thickness: <span class="value" id="lbl-beam-thickness">1.00 mm</span></div>
+                            <input type="range" id="slider-beam-thickness" min="0" max="4" step="0.05" value="1">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Beam height: <span class="value" id="lbl-beam-height">1.00 mm</span></div>
+                            <input type="range" id="slider-beam-height" min="0" max="10" step="0.1" value="1">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Beam position in pusher: <span class="value" id="lbl-beam-offset">3.0 mm</span></div>
+                            <input type="range" id="slider-beam-offset" min="0.5" max="14" step="0.1" value="3">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Beam temperature: <span class="value" id="lbl-beam-temp">300 K</span></div>
+                            <input type="range" id="slider-beam-temp" min="0" max="1000" step="5" value="300">
+                        </div>
+                        <div class="hint-text">
+                            The temperature sets the thermal velocity along the flight axis, which is what produces turn-around time. Drag it to zero to see the resolution the rest of the instrument would allow.
+                        </div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Detector Position</div>
+                        <div class="control-group">
+                            <div class="control-label">Aligned to m/z: <span class="value" id="lbl-align">1000</span></div>
+                            <input type="range" id="slider-align" min="50" max="4000" step="10" value="1000">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Detector length: <span class="value" id="lbl-detector-length">40 mm</span></div>
+                            <input type="range" id="slider-detector-length" min="4" max="120" step="1" value="40">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Detector half-height: <span class="value" id="lbl-detector-height">18 mm</span></div>
+                            <input type="range" id="slider-detector-height" min="2" max="50" step="1" value="18">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Shift along beam: <span class="value" id="lbl-detector-shift">0 mm</span></div>
+                            <input type="range" id="slider-detector-shift" min="-60" max="60" step="1" value="0">
+                        </div>
+                        <div class="derived-grid">
+                            <div><span class="lbl">Detector centre</span><span class="val" id="derived-detector">&mdash;</span></div>
+                            <div><span class="lbl">Reference flight</span><span class="val" id="derived-reference">&mdash;</span></div>
+                        </div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Species</div>
+                        <div class="species-legend" id="species-legend"></div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Display</div>
+                        <div class="control-group">
+                            <div class="control-label">Transverse scale: <span class="value" id="lbl-exaggeration">&times;4</span></div>
+                            <input type="range" id="slider-exaggeration" min="1" max="16" step="0.5" value="4">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Beam density drawn: <span class="value" id="lbl-density">12</span></div>
+                            <input type="range" id="slider-density" min="2" max="40" step="1" value="12">
+                        </div>
+                        <div class="control-group">
+                            <div class="control-label">Electrode opacity: <span class="value" id="lbl-opacity">55%</span></div>
+                            <input type="range" id="slider-opacity" min="0" max="100" step="5" value="55">
+                        </div>
+                    </div>
+
+                    <div class="controls-card">
+                        <div class="card-title">Custom Mixture</div>
+                        <div class="ion-adder-form">
+                            <div class="form-row">
+                                <div class="form-col">
+                                    <label class="control-label" for="input-add-mz">m/z</label>
+                                    <input type="number" id="input-add-mz" min="1" max="20000" step="0.0001" value="1000">
+                                </div>
+                                <div class="form-col">
+                                    <label class="control-label" for="input-add-abundance">Abundance</label>
+                                    <input type="number" id="input-add-abundance" min="1" max="100" step="1" value="100">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-col">
+                                    <label class="control-label" for="input-add-k0">1/K&#8320; (V&middot;s/cm&sup2;)</label>
+                                    <input type="number" id="input-add-k0" min="0.1" max="4" step="0.01" value="0.90">
+                                </div>
+                                <div class="form-col">
+                                    <label class="control-label" for="input-add-label">Label</label>
+                                    <input type="text" id="input-add-label" placeholder="Analyte">
+                                </div>
+                            </div>
+                            <div class="btn-row">
+                                <button class="btn btn-primary btn-sm" id="btn-add-species">Add to Mixture</button>
+                                <button class="btn btn-sm btn-danger" id="btn-clear-species">Clear Custom</button>
+                            </div>
+                        </div>
+                        <div class="species-legend" id="species-editor"></div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-theory">
+                    <div class="theory-doc">
+                        <h3>Why Orthogonal Acceleration Exists</h3>
+                        <p>A time-of-flight analyser measures one thing: how long an ion takes to travel a fixed path after being released at a known instant. That demands a <em>pulsed</em> start. Everything that feeds it &mdash; electrospray, an ion funnel, a collision cell &mdash; delivers a <em>continuous</em> beam.</p>
+                        <p>Orthogonal acceleration resolves the mismatch by accelerating a slab of the beam at right angles to its own motion. The energy given along the flight axis is thousands of electronvolts; the few electronvolts the ion already had along the beam axis are untouched and survive the entire flight. That surviving drift is why the path is a V and why the detector sits well to one side of the pusher.</p>
+
+                        <h3>Time of Flight</h3>
+                        <p>After acceleration through a potential <em>U</em> an ion of mass <em>m</em> and charge <em>Q</em> has</p>
+                        <div class="theory-equation">
+                            &frac12;mv&sup2; = QU &nbsp;&rarr;&nbsp; v = &radic;(2QU/m) &nbsp;&rarr;&nbsp; t = L / v = L &middot; &radic;(m / 2QU)
+                        </div>
+                        <p>so flight time goes as <strong>&radic;(m/z)</strong>. The charge cancels between the energy gained and the mass accelerated, which is why this is a mass-to-charge measurement. Every part of the flight scales the same way &mdash; the acceleration, the drift and the time spent inside the mirror &mdash; so the whole mass scale is fixed by one constant, plus an offset for delays that are not flight at all.</p>
+
+                        <h3>Duty Cycle: The Price of Orthogonality</h3>
+                        <p>Between pushes the beam keeps flowing. If the pusher aperture is <em>L<sub>p</sub></em> long and the beam crosses it at <em>v<sub>x</sub></em>, then in a push period <em>T</em> the beam advances <em>v<sub>x</sub>T</em> and only the last <em>L<sub>p</sub></em> of it is still inside when the pusher fires:</p>
+                        <div class="theory-equation">
+                            duty cycle = min(1, L<sub>p</sub> / (v<sub>x</sub> T)) &nbsp;&nbsp;&nbsp; with &nbsp; v<sub>x</sub> = &radic;(2QU<sub>beam</sub>/m)
+                        </div>
+                        <p>Because <em>v<sub>x</sub></em> falls as 1/&radic;(m/z), <strong>heavy ions have a better duty cycle than light ones</strong>. This is real mass discrimination built into the geometry, and it is the reason an orthogonal instrument's sensitivity is not flat across the mass range. This simulation does not apply that formula &mdash; it streams ions through the pusher and counts whatever is inside at the moment of the shot.</p>
+
+                        <h3>What Limits Resolution</h3>
+                        <p>Resolution is <em>R = t / 2&Delta;t</em>. Four things widen the peak, and they are measured separately in the Budget tab:</p>
+                        <ul>
+                            <li><strong>Turn-around time.</strong> An ion drifting backwards must be stopped before it can leave. It rejoins the trajectory of its forward-moving twin delayed by <em>&Delta;t = 2mv<sub>z</sub>/(QE)</em>, where <em>v<sub>z</sub></em> is thermal. Only a stronger pusher field or a colder beam reduces it, and in a well-tuned instrument it is what sets the ceiling.</li>
+                            <li><strong>Position in the pusher.</strong> The slab has thickness, so ions start at different potentials and leave with different energies. This is the largest term before the mirror deals with it, and the smallest after.</li>
+                            <li><strong>Beam height.</strong> Ions off the axis see a slightly different mirror potential and turn around at a slightly different depth.</li>
+                            <li><strong>Beam energy spread.</strong> Spread in the drift velocity, which changes where an ion lands on the detector rather than when.</li>
+                        </ul>
+
+                        <h3>The Two-Stage Ion Mirror</h3>
+                        <p>An ion with more energy penetrates further into a retarding field, so it travels a longer path and takes longer to come back. Choose the field correctly and that extra path exactly cancels the extra speed. One uniform stage cancels the energy dependence to <em>first</em> order; two stages with independently chosen fields cancel it to <strong>second</strong> order, and that is the difference between a resolution of a few hundred and a resolution of tens of thousands.</p>
+                        <p>Nothing in this simulation is told where the second-order tune is. The auto-tune searches both mirror voltages for the pair that flattens arrival time across the beam, and the focus curve collapses by four orders of magnitude when it finds it.</p>
+
+                        <h3>A Gridless Mirror Is Not A Linear Ramp</h3>
+                        <p>Putting grids in a mirror would make the field textbook-uniform and scatter a large fraction of the ions on every pass, so real mirrors are gridless. The price is that the potential inside is no longer the potential on the plates. Laplace's equation is solved here inside the mirror aperture with the plate potentials on the wall:</p>
+                        <div class="theory-equation">
+                            &nabla;&sup2;&Phi; = 0 &nbsp; inside, &nbsp; &Phi; = plate ramp on the wall
+                        </div>
+                        <p>Two consequences appear on their own. The field <strong>leaks out through the entrance</strong>, decaying over roughly the aperture half-height, which is the entrance lens. And the potential <strong>varies across the aperture</strong>, so an ion off the axis turns around at a different depth and arrives at a different time.</p>
+                        <p>That second effect is worth watching, because it is the largest term in the default budget. Thermal motion <em>across</em> the flight axis carries an ion off centre, and the time it costs grows roughly as the square of how far it strays &mdash; so the peak ends up with a sharp core and long tails rather than a Gaussian shape. Switch the mirror to the ideal ramp and the beam-height term falls to exactly zero, because a ramp with no transverse field cannot do this at all.</p>
+                        <p><strong>An honest limitation.</strong> The mirror modelled here has a plain linear potential ramp along its wall. Real gridless mirrors are stacks of many electrodes whose voltages are tuned individually to flatten the field across the aperture, precisely to suppress this term. The transverse behaviour you see is therefore a fair consequence of a simple two-stage gridless mirror, and worse than a well-engineered one.</p>
+
+                        <h3>Trapped Ion Mobility</h3>
+                        <p>In a TIMS tunnel the drift gas pushes ions forward while an electric field gradient holds them back. An ion parks where the two balance:</p>
+                        <div class="theory-equation">
+                            K &middot; E = v<sub>gas</sub> &nbsp;&rarr;&nbsp; E<sub>elution</sub> = v<sub>gas</sub> / K
+                        </div>
+                        <p>Lowering the field releases ions in order of the field they need. Large, low-mobility ions need the highest field and therefore <strong>elute first</strong> &mdash; the opposite order to a drift tube. The mobility at tunnel conditions follows from the definition of reduced mobility, <em>K = K&#8320;&middot;(P&#8320;/P)&middot;(T/T&#8320;)</em>; the collision cross-section follows from mobility through the Mason&ndash;Schamp relation, which is not computed here.</p>
+                        <p>Mobility separates what mass cannot: two ions of identical m/z and different shape are one peak in the spectrum and two spots on the mobility map. Note what TIMS does <em>not</em> fix by itself &mdash; the pusher duty cycle is set by the geometry and the push rate, and stays exactly where it was unless the release is short enough and synchronised to the shot.</p>
+
+                        <h3>How The Flight Is Integrated</h3>
+                        <p>The pusher, the accelerator and the drift each have a field that is constant across the region, so a step taken inside one of them is the exact solution however long it is; steps are cut short so they land precisely on every region boundary. Averaging two different accelerations across a field discontinuity is the single largest error available in a simulation like this, and avoiding it is what makes the turn-around time come out equal to <em>2mv<sub>z</sub>/(QE)</em> to machine precision. Only inside the mirror, where the solved field genuinely varies from point to point, is velocity Verlet doing real work.</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="tour-overlay" id="tour-overlay" hidden>
+        <div class="tour-panel" role="dialog" aria-modal="false" aria-labelledby="tour-title">
+            <div class="tour-header">
+                <div>
+                    <div class="tour-step-count" id="tour-step-count"></div>
+                    <h2 class="tour-title" id="tour-title"></h2>
+                </div>
+                <button class="btn btn-sm" id="btn-tour-close" aria-label="Close guided tour">&times;</button>
+            </div>
+            <div class="tour-body" id="tour-body"></div>
+            <div class="tour-footer">
+                <button class="btn btn-sm" id="btn-tour-prev">Back</button>
+                <div class="tour-dots" id="tour-dots"></div>
+                <button class="btn btn-sm btn-primary" id="btn-tour-next">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>
